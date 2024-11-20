@@ -1,2 +1,2 @@
 default:
-	gcc s1.c -o s1
+	gcc source.c -o target

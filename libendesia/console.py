@@ -4,6 +4,7 @@ import idaapi
 
 from libendesia import core
 from libendesia import results
+from libendesia.util import *
 
 import colorama
 colorama.init(autoreset=True)
@@ -41,6 +42,16 @@ else:
 
 import sys
 
+operations = {
+        "xor_cst": ["xor","eor"],
+        "mov_cst": ["mov"],
+        "sub_cst": ["sub"],
+        "add_cst": ["add"],
+        "mul_cst": ["imul"],  
+        "div_cst": ["idiv"], 
+        "shift_right_cst": ["shr"],
+        "shift_left_cst": ["shl"]
+    }
 
 class Argument():
     def __init__(self, cmd):
@@ -118,7 +129,21 @@ class Console(idaapi.PluginForm):
         self.input_line = None
 
         self.completer = None
-        self.command_list = ["clear", "examples", "help"]
+        self.command_list = ["clear", "examples", "help", "eval_list", "sections"]
+
+        self.attributes_functions = {
+            "range" : ["Filter by an adress range", "hex-hex"],
+            "params" : ["Filter by number of parameters in functions signature", "int"],
+            "section" : ["Filter by section name", "str"],
+            "xor_cst" : ["Filter by a XOR const instruction", "hex"],
+            "mov_cst" : ["Filter by a MOV const instruction", "hex"],
+            "sub_cst" : ["Filter by a SUB const instruction", "hex"],
+            "add_cst" : ["Filter by a add const instruction", "hex"],
+            "mul_cst" : ["Filter by a MUL const instruction", "hex"],
+            "div_cst" : ["Filter by a DIV const instruction", "hex"],
+            "shift_right_cst" : ["Filter by a shift to right const instruction", "hex"],
+            "shift_left_cst" : ["Filter by a shift to left const instruction", "hex"],
+        }
 
         self.decompilation_warn = 1
     
@@ -199,6 +224,10 @@ class Console(idaapi.PluginForm):
                 self.handler_examples()
             case "eval":
                 self.handler_eval_expr(args)
+            case "sections":
+                self.handler_sections()
+            case "eval_list":
+                self.handler_eval_list()
             case default:
                 self.log_message(f"{r}Unknown command:{ra} {command}")
                 self.log_message("")
@@ -238,6 +267,7 @@ class Console(idaapi.PluginForm):
         self.log_message(f"  list all functions with 2 parameters --> {g}eval F(param:2)")
         self.log_message(f"  list all functions with 2 parameters in section .text --> {g}eval F(param:2 section:.text)")
         self.log_message(f"  list all functions with 4 parameters in range 0xffba-0xfffc --> {g}eval F(param:4 range:0xffba-0xfffc)")
+        self.log_message(f"  list all functions with xor X, 0xff01 instructions --> {g}eval F(xor_cst:0xff01)")
         self.log_message("")
 
     # CMD : HELP
@@ -247,7 +277,23 @@ class Console(idaapi.PluginForm):
         self.log_message(f"  -> {g}clear{ra} : clear console")
         self.log_message(f"  -> {g}eval{ra} : Evaluate an expression. Type examples for some expressions examples")
         self.log_message(f"  -> {g}examples{ra} : Expressions examples.")
+        self.log_message(f"  -> {g}sections{ra} : List binary sections.")
+        self.log_message(f"  -> {g}eval_list{ra} : List all attributes for expressions")
         self.log_message("")
+
+    # CMD : SECTIONS
+    def handler_sections(self):
+        sections = core.get_all_sections()
+        for section in sections:
+            self.log_message(f"  -> {section} : {phex(sections[section][0])}-{phex(sections[section][1])}")
+
+    # CMD : EVAL_LIST
+    def handler_eval_list(self):
+        self.log_message("")
+        self.log_message(f"Functions evaluation : {g}F")
+        for attr in self.attributes_functions:
+            desc,type_ = self.attributes_functions[attr]
+            self.log_message(f" --- Attribute -> {y}{attr}{ra} :{desc} ({type_})")
 
     # CMD : EVAL
     def handler_eval_expr(self, args):
@@ -291,26 +337,37 @@ class Console(idaapi.PluginForm):
             range_args_r = range_args.replace(" ","").split("-")
             start_ea = int(range_args_r[0],16)
             end_ea =   int(range_args_r[1],16)
-            
+
         functions = core.get_functions_by_range(start_ea, end_ea)
 
         if "params" in params:
             functions_params_filtered = []
 
-            params = int(params['params'])
-            if not self.decompilation_warn:
+            params_nb = int(params['params'])
+            if self.decompilation_warn:
                 self.log_message(f"{y}Warn : 'params' evaluation internals function force IDA to decompile functions to get some typeinfo structs. This process may be long")
                 self.decompilation_warn = 0
 
             for function in functions:
                 size = core.get_function_parameters_count(function[0])
-                if size == params:
+                if size == params_nb:
                     functions_params_filtered.append(function)
 
             functions = functions_params_filtered
 
+        if any(op in params for op in operations.keys()):
+            for param in params:
+                if param in operations.keys():
+                    const = int(params[param],16)
+                    filtered_functions = [
+                        func for func in functions 
+                        if instr_match_op_cst(core.get_instructions_by_function(func[0]), operations[param], const)
+                    ]
+
+                    functions = filtered_functions
+
         c = results.ResultFunction("Expression results", functions)
         r = c.show()
 
-        self.log_message(f"{g} Evaluation : OK")
+        self.log_message(f"{g} Evaluation : OK | {len(functions)} results")
         

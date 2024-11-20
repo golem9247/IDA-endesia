@@ -29,9 +29,28 @@ available optionnals parameters:
     - section : filter by section 
     - range : filter by range (range:0xAAAA-0xBBBB)
     - params : filter by number of parameters
+    - xor_cst/add_cst/sub... (xor/mov/add/sub/mul/div/shift left/shift right) : filter by instructions OPERATION constant
 
 Example : 
 
 - `eval F(section:.text)` will evaluate all functions from .text and list them
-- `eval F(range:0x40000-0x400ab params:5)` will evaluate all functions in range [0x40000-0x400ab] and with 5parameters
+- `eval F(params:5)` will evaluate all functions with 5parameters in functions signature
+- `eval F(xor_cst:0xff01)` will evaluate all functions with a xor X, 0xff01 instructions
 
+With parameters , we can create complex query to fast sort functions. 
+For example, we are searching for a stripped checksum function. 
+We know the function use 2 parameters (input value, size) and the function initialise 2 constant : 0xffff and 0xA001
+
+We can create query : `eval F(section:.text params:2 mov_cst:0xa001)` -> We found our function pretty fast
+
+## commands 
+
+- help : show helps 
+- examples : show some eval examples
+- clear : clear terminal
+- sections : list binary sections
+- eval_list : list all attributes for expressions
+
+## BUGS & SUPPORT
+
+for now, this program has been tested on armv7 and x86. feel free to pull req/create an issue

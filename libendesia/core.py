@@ -6,9 +6,10 @@ import idc
 import ida_typeinf
 import ida_nalt
 import ida_hexrays
-
+import ida_funcs
 
 def get_section_range_by_name(segm_name):
+    """ return sections matching by name"""
     for segment in idautils.Segments():
         start_ea = idc.get_segm_start(segment)  
         end_ea = idc.get_segm_end(segment)
@@ -21,7 +22,7 @@ def get_section_range_by_name(segm_name):
 
 
 def get_functions_by_range(start_ea, end_ea):
-
+    """return all functions in a range """
     functions = []
     if start_ea is None or end_ea is None:
         funcs = idautils.Functions()
@@ -52,3 +53,26 @@ def get_function_parameters_count(ea):
         if func_tinfo.get_func_details(func_data):
             return func_data.size()  # Number of parameters
     return 0
+
+def get_all_sections():
+    """return the list of all binary sections"""
+    segm = {}
+    for segment in idautils.Segments():
+        start_ea = idc.get_segm_start(segment)  
+        end_ea = idc.get_segm_end(segment)
+        name = idc.get_segm_name(segment) 
+        segm[name] = [start_ea, end_ea]
+    return segm
+
+def get_instructions_by_function(ea):
+    """Retrieves all the instructions within a function at the specified effective address (EA)."""
+    func = ida_funcs.get_func(ea)
+    if not func:
+        return []
+
+    instructions = []
+    for addr in idautils.FuncItems(func.start_ea):
+        if idc.is_code(idc.get_full_flags(addr)):
+            disasm = idc.generate_disasm_line(addr, 0)
+            instructions.append((addr, disasm))
+    return instructions
