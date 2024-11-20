@@ -7,6 +7,8 @@ Console support previous commands with Key-UP event.
 
 Can be Launched with Shift+F2 or with Edit->plugins->endesia
 
+![Alt text](./img/base.png "Endesia console")
+
 ## Installation
 
 Copy `libendesia` and `endesia-plugin.py` in IDAPRO plugins folder or `python3 install.py`
