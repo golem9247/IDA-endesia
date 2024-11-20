@@ -1,0 +1,11 @@
+/build/
+/dist/
+/*.egg-info/
+__pycache__
+*.til
+*.i64
+*.nam
+*.id1
+*.id2
+*.id0
+s1
