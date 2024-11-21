@@ -9,12 +9,9 @@ from libendesia.util import *
 
 import colorama
 colorama.init(autoreset=True)
-
-from colorama import Fore
-from colorama import Style
-
-from copy import copy
+from colorama import Fore,Style
 import re
+import os
 
 red = Fore.RED
 reset = Style.RESET_ALL
@@ -44,41 +41,51 @@ else:
 
 import sys
 
-operations = {
-        "xor_cst": ["xor","eor"],
-        "mov_cst": ["mov"],
-        "sub_cst": ["sub"],
-        "add_cst": ["add"],
-        "mul_cst": ["imul"],  
-        "div_cst": ["idiv"], 
-        "shift_right_cst": ["shr"],
-        "shift_left_cst": ["shl"]
+operation_register_common = {
+        "xor": ["xor","eor"],
+        "mov": ["mov"],
+        "sub": ["sub"],
+        "add": ["add"],
+        "mul": ["mul"],  
+        "div": ["div"], 
+        "shr": ["shr"],
+        "shl": ["shl"]
     }
 
-class Argument():
+class Argument:
     def __init__(self, cmd):
         self.cmd = cmd
         self.root_cmd = self.cmd.split(" ")[0]
+        self.p_args = list()
 
-        self.p_attr = {}
+    def get_expr_args(self) -> int:
 
-    def get_expr_args(self):
-        """
-        Parses the given expression into a dictionary format.
-        """
-        pattern = r'(\w+)\((.*?)\)'
-        matches = re.findall(pattern, self.cmd)
-        p_attr = {}
+        expr = self.cmd[len(self.root_cmd):].strip()
 
-        for primary, secondary in matches:
-            secondary_pattern = r'(\w+):([^\s]+)'
-            secondary_matches = re.findall(secondary_pattern, secondary)
-            p_attr[primary] = {
-                key: value for key, value in secondary_matches
-            }
-        
-        self.p_attr = p_attr
+        tokens = re.split(r'([&|])', expr)
+        for i, token in enumerate(tokens):
+            token = token.strip()
+            if not token or token in ['&', '|']:
+                continue
 
+            match = re.match(r'(\w+)\s*(<=|>=|=|<|>|!=)\s*([\w.]+(?:-\w+)?)', token)
+            if not match:
+                return -1
+
+            arg_name, operator, arg_value = match.groups()
+            relation_next = None
+
+            if i + 1 < len(tokens):
+                relation_next = 'and' if tokens[i + 1] == '&' else 'or'
+
+            self.p_args.append({
+                "arg_name": arg_name,
+                "arg_value": arg_value,
+                "operator": operator,
+                "relation_next": relation_next
+            })
+            
+        return 0
 
 class HistoryLineEdit(QtWidgets.QLineEdit if is_using_pyqt5() else QtGui.QLineEdit):
     """
@@ -89,6 +96,30 @@ class HistoryLineEdit(QtWidgets.QLineEdit if is_using_pyqt5() else QtGui.QLineEd
         self.history = []  # Command history
         self.history_index = -1  # Current position in history
 
+        self.history_file = "/tmp/.endesia.history"
+        self.map_history()
+
+
+    def map_history(self):
+
+        if not os.path.exists(self.history_file):
+            self.fd = open(self.history_file,"w")
+        else:
+            self.fd= open(self.history_file,"r")
+            size = self.fd.tell()
+            if size > 10000:
+                os.unlink(self.history_file)
+                self.fd = open(self.history_file,"w")
+                return
+
+            self.history = self.fd.readlines()
+            self.fd.close()
+            self.fd = open(self.history_file,"a")
+            self.history_index = len(self.history)
+
+    def __del__(self):
+        self.fd.close()
+
     def add_to_history(self, command):
         """
         Adds a new command to the history, avoiding duplicates.
@@ -96,6 +127,8 @@ class HistoryLineEdit(QtWidgets.QLineEdit if is_using_pyqt5() else QtGui.QLineEd
         if command and (len(self.history) == 0 or command != self.history[-1]):
             self.history.append(command)
         self.history_index = len(self.history)  # Reset index to the end
+        self.fd.write(command+"\n")
+        self.fd.flush()
 
     def keyPressEvent(self, event):
         """
@@ -105,12 +138,12 @@ class HistoryLineEdit(QtWidgets.QLineEdit if is_using_pyqt5() else QtGui.QLineEd
             # Navigate to the previous command
             if self.history and self.history_index > 0:
                 self.history_index -= 1
-                self.setText(self.history[self.history_index])
+                self.setText(self.history[self.history_index].strip())
         elif event.key() == QtCore.Qt.Key_Down:
             # Navigate to the next command
             if self.history and self.history_index < len(self.history) - 1:
                 self.history_index += 1
-                self.setText(self.history[self.history_index])
+                self.setText(self.history[self.history_index].strip())
             else:
                 self.history_index = len(self.history)
                 self.clear()
@@ -131,19 +164,17 @@ class Console(idaapi.PluginForm):
 
         self.attributes_functions = {
             "range" : ["Filter by an adress range", "hex-hex"],
-            "params" : ["Filter by number of parameters in functions signature", "int/hex"],
+            "param" : ["Filter by number of parameters in functions signature", "int/hex"],
             "section" : ["Filter by section name", "str"],
-            "block_eq" : ["Filter by number of blocks in flowgraph : equal", "int/hex"],
-            "block_more" : ["Filter by number of blocks in flowgraph : superior scrict", "int/hex"],
-            "block_less" : ["Filter by number of blocks in flowgraph : inferior scrict", "int/hex"],
-            "xor_cst" : ["Filter by a XOR const instruction", "int/hex"],
-            "mov_cst" : ["Filter by a MOV const instruction", "int/hex"],
-            "sub_cst" : ["Filter by a SUB const instruction", "int/hex"],
-            "add_cst" : ["Filter by a add const instruction", "int/hex"],
-            "mul_cst" : ["Filter by a MUL const instruction", "int/hex"],
-            "div_cst" : ["Filter by a DIV const instruction", "int/hex"],
-            "shift_right_cst" : ["Filter by a shift to right const instruction", "int/hex"],
-            "shift_left_cst" : ["Filter by a shift to left const instruction", "int/hex"],
+            "block" : ["Filter by number of blocks in flowgraph : equal", "int/hex"],
+            "xor" : ["Filter by a XOR const instruction", "int/hex"],
+            "mov" : ["Filter by a MOV const instruction", "int/hex"],
+            "sub" : ["Filter by a SUB const instruction", "int/hex"],
+            "add" : ["Filter by a add const instruction", "int/hex"],
+            "mul" : ["Filter by a MUL const instruction", "int/hex"],
+            "div" : ["Filter by a DIV const instruction", "int/hex"],
+            "shr" : ["Filter by a shift to right const instruction", "int/hex"],
+            "shl" : ["Filter by a shift to left const instruction", "int/hex"],
         }
 
         self.decompilation_warn = 1
@@ -235,6 +266,15 @@ class Console(idaapi.PluginForm):
                 self.log_message(f"{red}Unknown command:{reset} {command}")
                 self.log_message("")
 
+    def err(self, message):
+        self.log_message(f"{red}{message}")
+    
+    def warn(self, message):
+        self.log_message(f"{yellow}{message}")
+    
+    def success(self, message):
+        self.log_message(f"{green}{message}")
+
     def log_message(self, message):
         """
         Logs a message to the console output area.
@@ -267,10 +307,10 @@ class Console(idaapi.PluginForm):
     # CMD : EXAMPLES
     def handler_examples(self):
         self.log_message("Examples Expression :")
-        self.log_message(f"  list all functions with 2 parameters --> {green}eval F(param:2)")
-        self.log_message(f"  list all functions with 2 parameters in section .text --> {green}eval F(param:2 section:.text)")
-        self.log_message(f"  list all functions with 4 parameters in range 0xffba-0xfffc --> {green}eval F(param:4 range:0xffba-0xfffc)")
-        self.log_message(f"  list all functions with xor X, 0xff01 instructions --> {green}eval F(xor_cst:0xff01)")
+        self.log_message(f"  list all functions with 2 parameters --> {green}eval param=2")
+        self.log_message(f"  list all functions with 4 parameters in range 0xffba-0xfffc --> {green}eval param=4 range=0xffba-0xfffc)")
+        self.log_message(f"  list all functions with xor X, 0xff01 instructions --> {green}eval xor=0xff01)")
+        self.log_message(f"  list all functions in .text that have a xor const with 0xffaabbcc OR 0xffaabbdd --> {green}eval section=.text&xor=0xffaabbcc|xor=0xffaabbdd")
         self.log_message("")
 
     # CMD : HELP
@@ -285,6 +325,7 @@ class Console(idaapi.PluginForm):
         self.log_message(f"  -> {green}uncolor{reset} : Remove all generated color created by matching instructions const")
         self.log_message("")
 
+    # CMD : UNCOLOR
     def handler_uncolor(self):
 
         for ea in self.highlighted_ea:
@@ -300,8 +341,6 @@ class Console(idaapi.PluginForm):
 
     # CMD : EVAL_LIST
     def handler_eval_list(self):
-        self.log_message("")
-        self.log_message(f"Functions evaluation : {green}F")
         for attr in self.attributes_functions:
             desc,type_ = self.attributes_functions[attr]
             self.log_message(f" --- Attribute -> {yellow}{attr}{reset} :{desc} ({type_})")
@@ -309,115 +348,104 @@ class Console(idaapi.PluginForm):
     # CMD : EVAL
     def handler_eval_expr(self, args):
 
-        args.get_expr_args()
-
-        if (len(args.p_attr) == 0):
-            self.log_message(f"{red}Couldn't evaluate Expression{reset}")
+        if(args.get_expr_args()):
+            self.log_message(f"{red}Invalid Expression Syntax")
             return
-
-        for p_attr in args.p_attr:
-            p_attr_g = args.p_attr[p_attr]
-        
-            match p_attr:
-                case 'F':
-                    self._function_eval(p_attr_g)
-                case default:
-                    self.log_message(f"Unknow Expression {yellow}{p_attr}{reset} ! Will not evaluate")
-
-        self.log_message("")
-
-    #------- CORE COMMANDS SECTIONS
-
-    def _function_eval(self, params):
         
         start_ea, end_ea = None,None
-        if 'section' in params and 'range' in params:
-            self.log_message(f"{yellow}Warn : 'section' is useless as 'range' will override it")
 
-        if 'section' in params:
-            start_ea,end_ea = core.get_section_range_by_name(params['section'])
-            if(self.ASS_VALID(start_ea=start_ea, end_ea=end_ea, err="bad section name")):
-                return
-            params.pop('section')
-            
-        if 'range' in params:
-            range_args = params['range']
-            if "-" not in range_args:
-                self.log_message(f"{red} : 'range' parameters isn't valid, format -> range:0xY-0xZ")
-                return
-            
-            range_args_r = range_args.replace(" ","").split("-")
-            start_ea = int(range_args_r[0],16)
-            end_ea =   int(range_args_r[1],16)
-            params.pop('range')
+        # section/range attributes
+        for p_attr in args.p_args:
+            p_attr_name = p_attr['arg_name']
+            if p_attr_name not in ["section","range"]:
+                continue
 
+            p_attr_value = p_attr['arg_value']
+            p_attr_op = p_attr['operator']
+            p_attr_rel_next = p_attr['relation_next']            
+
+            if p_attr_op != "=":
+                self.err(f"{p_attr_name} attributes support only '=' operator")
+                return
+            
+            if p_attr_rel_next != "and" and p_attr_rel_next != None:
+                self.err(f"{p_attr_name} attributes support only '&' relation.")
+                return
+
+            if p_attr_name == "section":
+                start_ea, end_ea = core.get_section_range_by_name(p_attr_value)
+                if self.ASS_VALID(start_ea=start_ea, end_ea=end_ea, err="bad section name"):
+                    return
+                
+            elif p_attr_name == "range":
+                try:
+                    start_ea, end_ea = map(lambda x: int(x, 16), p_attr_value.split("-"))
+                except ValueError:
+                    self.err("'range' parameters isn't valid, format -> range=0xY-0xZ")
+                    return
+    
         functions = core.get_functions_by_range(start_ea, end_ea)
+        for p_attr in args.p_args:
+            p_attr_name = p_attr['arg_name']
+            if p_attr_name in ["section","range"]:
+                continue
+            p_attr_value = cast_from_str(p_attr['arg_value'])
+            p_attr_op = p_attr['operator']
+            p_attr_rel_next = p_attr['relation_next']
 
-        if "params" in params:
-            functions_params_filtered = []
+            p_attr_functions = {}
 
-            params_nb = cast_from_str(params['params'])
-            if self.decompilation_warn:
-                self.log_message(f"{yellow}Warn : 'params' evaluation internals function force IDA to decompile functions to get some typeinfo structs. This process may be long")
-                self.decompilation_warn = 0
+            # Filter by number of parameters
+            if p_attr_name == "param":
+                if self.decompilation_warn:
+                    self.warn("'param' evaluation may force decompilation, which can be slow.")
+                    self.decompilation_warn = 0
 
-            for function in functions:
-                size = core.get_function_parameters_count(function[0])
-                if size == params_nb:
-                    functions_params_filtered.append(function)
+                for ea in functions:
+                    fp_cnt = core.get_function_parameters_count(ea)
+                    if operator(p_attr_op, fp_cnt, p_attr_value):
+                        p_attr_functions[ea] = functions[ea]
 
-            functions = functions_params_filtered
-            params.pop('params')
+            # Filter by operation constants (e.g., xor_cst, add_cst)
+            elif p_attr_name in operation_register_common:
+                op_type = operation_register_common[p_attr_name]
+                
+                for ea in functions:
+                    matched_instr = instr_match_op_cst(core.get_instructions_by_function(ea), op_type, p_attr_value, p_attr_op)
+                    if matched_instr:
+                        idc.set_color(matched_instr, idc.CIC_ITEM, 0x008000) #green
+                        self.highlighted_ea.append(matched_instr)
+                        p_attr_functions[ea] = functions[ea]
 
-        if any(op in params for op in operations.keys()):
-            params_ = copy(params)
-            for param in params_:
-                if param in operations.keys():
-                    const = cast_from_str(params_[param])
+            # Filter by number of blocks
+            elif p_attr_name == "block":
+                for ea in functions:
+                    nb_block = core.get_number_of_blocks(ea)
+                    if operator(p_attr_op, nb_block, p_attr_value):
+                        p_attr_functions[ea] = functions[ea]
 
-                    filtered_functions = []
+            #unhandler attributes
+            else:
+                self.warn(f"Extra attributes {p_attr_name} found! Unhandled")
 
-                    for func in functions:
-                        m_cgr = instr_match_op_cst(core.get_instructions_by_function(func[0]), operations[param], const)
-                        if m_cgr:
-                            idc.set_color(m_cgr, idc.CIC_ITEM, 0x008000)
-                            filtered_functions.append(func)
-                            self.highlighted_ea.append(m_cgr)
+            if p_attr_rel_next == "and":
+                functions = {k: functions[k] for k in functions if k in p_attr_functions}
 
-                    functions = filtered_functions
-                    params.pop(param)
+            elif p_attr_rel_next == "or":
+                functions = functions.copy()
+                functions.update(p_attr_functions)
 
-        if any(op in params for op in ["block_eq", "block_more", "block_less"]):
-            params_ = copy(params)
-            for param in params_:
-                if param in ["block_eq", "block_more", "block_less"]:
-                    const = cast_from_str(params_[param])
+            elif p_attr_rel_next == None:
+                functions = p_attr_functions
+        
+        
+        functions_list = []
+        for ea in functions:
+            functions_list.append([ea, functions[ea]])
 
-                    filtered_functions = []
-                    for func in functions:
-                        nb_block = core.get_number_of_blocks(func[0])
-                        match param:
-                            case "block_eq":
-                                if nb_block == const:
-                                    filtered_functions.append(func) 
-                            case "block_more":
-                                if nb_block > const:
-                                    filtered_functions.append(func) 
-                            case "block_less":
-                                if nb_block < const:
-                                    filtered_functions.append(func) 
-
-                    functions = filtered_functions
-                    params.pop(param)
-
-
-        if len(params) != 0:
-            self.log_message(f"{red} Extra attributes found! Those attributes couldn't be processed :")
-            for param in params:
-                self.log_message(f"{red} -> Unknow attr : {param}")
-
-        c = results.ResultFunction("Expression results", functions)
+        c = results.ResultFunction("Expression results", functions_list)
         _ = c.show()
 
-        self.log_message(f"{green} Evaluation : OK | {len(functions)} results")
+        self.log_message(f"{green} Evaluation : OK | {len(functions_list)} results")
+        self.log_message("")
         

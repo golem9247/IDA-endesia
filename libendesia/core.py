@@ -23,7 +23,7 @@ def get_section_range_by_name(segm_name):
 
 def get_functions_by_range(start_ea, end_ea):
     """return all functions in a range """
-    functions = []
+    functions = {}
     if start_ea is None or end_ea is None:
         funcs = idautils.Functions()
     else:
@@ -31,7 +31,7 @@ def get_functions_by_range(start_ea, end_ea):
 
     for ea in funcs:
         func_name = idc.get_name(ea)
-        functions.append([ea, func_name])
+        functions[ea] = func_name
 
     return functions
 
