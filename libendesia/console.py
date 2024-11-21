@@ -1,6 +1,7 @@
 # -*- encoding: utf8 -*-
 
 import idaapi
+import idc
 
 from libendesia import core
 from libendesia import results
@@ -12,19 +13,20 @@ colorama.init(autoreset=True)
 from colorama import Fore
 from colorama import Style
 
+from copy import copy
 import re
 
-r = Fore.RED
-ra = Style.RESET_ALL
-g = Fore.GREEN
-y = Fore.YELLOW
+red = Fore.RED
+reset = Style.RESET_ALL
+green = Fore.GREEN
+yellow = Fore.YELLOW
 
 def colorama_update(message):
     message = (
-            message.replace(r, '<span style="color:red;">')
-                   .replace(g, '<span style="color:green;">')
-                   .replace(y, '<span style="color:orange;">')
-                   .replace(ra, '</span>')
+            message.replace(red, '<span style="color:red;">')
+                   .replace(green, '<span style="color:green;">')
+                   .replace(yellow, '<span style="color:orange;">')
+                   .replace(reset, '</span>')
         )
     return message
 
@@ -72,17 +74,11 @@ class Argument():
             secondary_pattern = r'(\w+):([^\s]+)'
             secondary_matches = re.findall(secondary_pattern, secondary)
             p_attr[primary] = {
-                key: self._cast_value(value) for key, value in secondary_matches
+                key: value for key, value in secondary_matches
             }
         
         self.p_attr = p_attr
 
-    def _cast_value(self, value):
-        try:
-            return int(value)
-        except ValueError:
-            return value
-        
 
 class HistoryLineEdit(QtWidgets.QLineEdit if is_using_pyqt5() else QtGui.QLineEdit):
     """
@@ -129,20 +125,25 @@ class Console(idaapi.PluginForm):
         self.input_line = None
 
         self.completer = None
-        self.command_list = ["clear", "examples", "help", "eval_list", "sections"]
+        self.command_list = ["clear", "examples", "help", "eval_list", "sections", "uncolor"]
+
+        self.highlighted_ea = []
 
         self.attributes_functions = {
             "range" : ["Filter by an adress range", "hex-hex"],
-            "params" : ["Filter by number of parameters in functions signature", "int"],
+            "params" : ["Filter by number of parameters in functions signature", "int/hex"],
             "section" : ["Filter by section name", "str"],
-            "xor_cst" : ["Filter by a XOR const instruction", "hex"],
-            "mov_cst" : ["Filter by a MOV const instruction", "hex"],
-            "sub_cst" : ["Filter by a SUB const instruction", "hex"],
-            "add_cst" : ["Filter by a add const instruction", "hex"],
-            "mul_cst" : ["Filter by a MUL const instruction", "hex"],
-            "div_cst" : ["Filter by a DIV const instruction", "hex"],
-            "shift_right_cst" : ["Filter by a shift to right const instruction", "hex"],
-            "shift_left_cst" : ["Filter by a shift to left const instruction", "hex"],
+            "block_eq" : ["Filter by number of blocks in flowgraph : equal", "int/hex"],
+            "block_more" : ["Filter by number of blocks in flowgraph : superior scrict", "int/hex"],
+            "block_less" : ["Filter by number of blocks in flowgraph : inferior scrict", "int/hex"],
+            "xor_cst" : ["Filter by a XOR const instruction", "int/hex"],
+            "mov_cst" : ["Filter by a MOV const instruction", "int/hex"],
+            "sub_cst" : ["Filter by a SUB const instruction", "int/hex"],
+            "add_cst" : ["Filter by a add const instruction", "int/hex"],
+            "mul_cst" : ["Filter by a MUL const instruction", "int/hex"],
+            "div_cst" : ["Filter by a DIV const instruction", "int/hex"],
+            "shift_right_cst" : ["Filter by a shift to right const instruction", "int/hex"],
+            "shift_left_cst" : ["Filter by a shift to left const instruction", "int/hex"],
         }
 
         self.decompilation_warn = 1
@@ -228,8 +229,10 @@ class Console(idaapi.PluginForm):
                 self.handler_sections()
             case "eval_list":
                 self.handler_eval_list()
+            case "uncolor":
+                self.handler_uncolor()
             case default:
-                self.log_message(f"{r}Unknown command:{ra} {command}")
+                self.log_message(f"{red}Unknown command:{reset} {command}")
                 self.log_message("")
 
     def log_message(self, message):
@@ -241,7 +244,7 @@ class Console(idaapi.PluginForm):
 
     def Show(self, name="Endesia Console"):
         form = idaapi.PluginForm.Show(self, name)
-        self.log_message(f"{g}--------- Endesia Console Started ------------")
+        self.log_message(f"{green}--------- Endesia Console Started ------------")
         self.handler_help()
         return form
 
@@ -253,7 +256,7 @@ class Console(idaapi.PluginForm):
         for arg in kwargs:
             v_arg = kwargs.get(arg, None)
             if v_arg is None:
-                self.log_message(f"{r} {arg} is None ! err={err}")
+                self.log_message(f"{red} {arg} is None ! err={err}")
                 return 1
             
         return 0
@@ -264,22 +267,30 @@ class Console(idaapi.PluginForm):
     # CMD : EXAMPLES
     def handler_examples(self):
         self.log_message("Examples Expression :")
-        self.log_message(f"  list all functions with 2 parameters --> {g}eval F(param:2)")
-        self.log_message(f"  list all functions with 2 parameters in section .text --> {g}eval F(param:2 section:.text)")
-        self.log_message(f"  list all functions with 4 parameters in range 0xffba-0xfffc --> {g}eval F(param:4 range:0xffba-0xfffc)")
-        self.log_message(f"  list all functions with xor X, 0xff01 instructions --> {g}eval F(xor_cst:0xff01)")
+        self.log_message(f"  list all functions with 2 parameters --> {green}eval F(param:2)")
+        self.log_message(f"  list all functions with 2 parameters in section .text --> {green}eval F(param:2 section:.text)")
+        self.log_message(f"  list all functions with 4 parameters in range 0xffba-0xfffc --> {green}eval F(param:4 range:0xffba-0xfffc)")
+        self.log_message(f"  list all functions with xor X, 0xff01 instructions --> {green}eval F(xor_cst:0xff01)")
         self.log_message("")
 
     # CMD : HELP
     def handler_help(self):
 
         self.log_message("Available commands :")
-        self.log_message(f"  -> {g}clear{ra} : clear console")
-        self.log_message(f"  -> {g}eval{ra} : Evaluate an expression. Type examples for some expressions examples")
-        self.log_message(f"  -> {g}examples{ra} : Expressions examples.")
-        self.log_message(f"  -> {g}sections{ra} : List binary sections.")
-        self.log_message(f"  -> {g}eval_list{ra} : List all attributes for expressions")
+        self.log_message(f"  -> {green}clear{reset} : clear console")
+        self.log_message(f"  -> {green}eval{reset} : Evaluate an expression. Type examples for some expressions examples")
+        self.log_message(f"  -> {green}examples{reset} : Expressions examples.")
+        self.log_message(f"  -> {green}sections{reset} : List binary sections.")
+        self.log_message(f"  -> {green}eval_list{reset} : List all attributes for expressions")
+        self.log_message(f"  -> {green}uncolor{reset} : Remove all generated color created by matching instructions const")
         self.log_message("")
+
+    def handler_uncolor(self):
+
+        for ea in self.highlighted_ea:
+            idc.set_color(ea, idc.CIC_ITEM, 0xFFFFFF)
+        self.highlighted_ea = []
+        self.log_message("Uncolored all instructions highlighted")
 
     # CMD : SECTIONS
     def handler_sections(self):
@@ -290,10 +301,10 @@ class Console(idaapi.PluginForm):
     # CMD : EVAL_LIST
     def handler_eval_list(self):
         self.log_message("")
-        self.log_message(f"Functions evaluation : {g}F")
+        self.log_message(f"Functions evaluation : {green}F")
         for attr in self.attributes_functions:
             desc,type_ = self.attributes_functions[attr]
-            self.log_message(f" --- Attribute -> {y}{attr}{ra} :{desc} ({type_})")
+            self.log_message(f" --- Attribute -> {yellow}{attr}{reset} :{desc} ({type_})")
 
     # CMD : EVAL
     def handler_eval_expr(self, args):
@@ -301,7 +312,7 @@ class Console(idaapi.PluginForm):
         args.get_expr_args()
 
         if (len(args.p_attr) == 0):
-            self.log_message(f"{r}Couldn't evaluate Expression{ra}")
+            self.log_message(f"{red}Couldn't evaluate Expression{reset}")
             return
 
         for p_attr in args.p_attr:
@@ -311,7 +322,7 @@ class Console(idaapi.PluginForm):
                 case 'F':
                     self._function_eval(p_attr_g)
                 case default:
-                    self.log_message(f"Unknow Expression {y}{p_attr}{ra} ! Will not evaluate")
+                    self.log_message(f"Unknow Expression {yellow}{p_attr}{reset} ! Will not evaluate")
 
         self.log_message("")
 
@@ -321,31 +332,33 @@ class Console(idaapi.PluginForm):
         
         start_ea, end_ea = None,None
         if 'section' in params and 'range' in params:
-            self.log_message(f"{y}Warn : 'section' is useless as 'range' will override it")
+            self.log_message(f"{yellow}Warn : 'section' is useless as 'range' will override it")
 
         if 'section' in params:
             start_ea,end_ea = core.get_section_range_by_name(params['section'])
             if(self.ASS_VALID(start_ea=start_ea, end_ea=end_ea, err="bad section name")):
                 return
+            params.pop('section')
             
         if 'range' in params:
             range_args = params['range']
             if "-" not in range_args:
-                self.log_message(f"{r} : 'range' parameters isn't valid, format -> range:0xY-0xZ")
+                self.log_message(f"{red} : 'range' parameters isn't valid, format -> range:0xY-0xZ")
                 return
             
             range_args_r = range_args.replace(" ","").split("-")
             start_ea = int(range_args_r[0],16)
             end_ea =   int(range_args_r[1],16)
+            params.pop('range')
 
         functions = core.get_functions_by_range(start_ea, end_ea)
 
         if "params" in params:
             functions_params_filtered = []
 
-            params_nb = int(params['params'])
+            params_nb = cast_from_str(params['params'])
             if self.decompilation_warn:
-                self.log_message(f"{y}Warn : 'params' evaluation internals function force IDA to decompile functions to get some typeinfo structs. This process may be long")
+                self.log_message(f"{yellow}Warn : 'params' evaluation internals function force IDA to decompile functions to get some typeinfo structs. This process may be long")
                 self.decompilation_warn = 0
 
             for function in functions:
@@ -354,20 +367,57 @@ class Console(idaapi.PluginForm):
                     functions_params_filtered.append(function)
 
             functions = functions_params_filtered
+            params.pop('params')
 
         if any(op in params for op in operations.keys()):
-            for param in params:
+            params_ = copy(params)
+            for param in params_:
                 if param in operations.keys():
-                    const = int(params[param],16)
-                    filtered_functions = [
-                        func for func in functions 
-                        if instr_match_op_cst(core.get_instructions_by_function(func[0]), operations[param], const)
-                    ]
+                    const = cast_from_str(params_[param])
+
+                    filtered_functions = []
+
+                    for func in functions:
+                        m_cgr = instr_match_op_cst(core.get_instructions_by_function(func[0]), operations[param], const)
+                        if m_cgr:
+                            idc.set_color(m_cgr, idc.CIC_ITEM, 0x008000)
+                            filtered_functions.append(func)
+                            self.highlighted_ea.append(m_cgr)
 
                     functions = filtered_functions
+                    params.pop(param)
+
+        if any(op in params for op in ["block_eq", "block_more", "block_less"]):
+            params_ = copy(params)
+            for param in params_:
+                if param in ["block_eq", "block_more", "block_less"]:
+                    const = cast_from_str(params_[param])
+
+                    filtered_functions = []
+                    for func in functions:
+                        nb_block = core.get_number_of_blocks(func[0])
+                        match param:
+                            case "block_eq":
+                                if nb_block == const:
+                                    filtered_functions.append(func) 
+                            case "block_more":
+                                if nb_block > const:
+                                    filtered_functions.append(func) 
+                            case "block_less":
+                                if nb_block < const:
+                                    filtered_functions.append(func) 
+
+                    functions = filtered_functions
+                    params.pop(param)
+
+
+        if len(params) != 0:
+            self.log_message(f"{red} Extra attributes found! Those attributes couldn't be processed :")
+            for param in params:
+                self.log_message(f"{red} -> Unknow attr : {param}")
 
         c = results.ResultFunction("Expression results", functions)
-        r = c.show()
+        _ = c.show()
 
-        self.log_message(f"{g} Evaluation : OK | {len(functions)} results")
+        self.log_message(f"{green} Evaluation : OK | {len(functions)} results")
         

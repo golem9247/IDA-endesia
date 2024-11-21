@@ -9,6 +9,9 @@ def ishex(v):
             return True
     return False
 
+def cast_from_str(v):
+    return int(v,16) if ishex(v) else int(v,10)
+
 def phex(value, pad=8):
     return f"{value:#0{pad}x}"
 
@@ -19,7 +22,7 @@ def instr_match_op_cst(instructions, ops, cst):
     if len(instructions) == 0:
         return 0
     
-    for _, disasm in instructions:
+    for ea, disasm in instructions:
         for operation in ops:
             disasm = disasm.lower()
             if not operation in disasm:
@@ -31,8 +34,8 @@ def instr_match_op_cst(instructions, ops, cst):
             if not match:
                 continue
             match_gr = match.group(1).replace("h","").replace("#","")
-            instr_const = int(match_gr, 16 if ishex(match.group(1)) else 10)
+            instr_const = cast_from_str(match_gr)
             if instr_const == cst:
-                return 1
+                return ea
 
     return 0

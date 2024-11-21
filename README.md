@@ -3,7 +3,10 @@
 Endesia is a interactive console in IDA with expression evaluation support. 
 The goal is to provide expression that can be evaluated to sort/manage IDA binaries. 
 
-Console support previous commands with Key-UP event.
+Additional Functionnalities:
+ - Console support previous commands with Key-UP event.
+ - AutoCompletion
+ - Highlight Instruction when matching attributes
 
 Can be Launched with Shift+F2 or with Edit->plugins->endesia
 
@@ -30,6 +33,8 @@ available optionnals parameters:
     - range : filter by range (range:0xAAAA-0xBBBB)
     - params : filter by number of parameters
     - xor_cst/add_cst/sub... (xor/mov/add/sub/mul/div/shift left/shift right) : filter by instructions OPERATION constant
+    - block_eq : filter by number of blocks in flowgraph : equal
+    - block_more/block_less : same but superior script/inferior scrict
 
 Example : 
 
@@ -37,11 +42,14 @@ Example :
 - `eval F(params:5)` will evaluate all functions with 5parameters in functions signature
 - `eval F(xor_cst:0xff01)` will evaluate all functions with a xor X, 0xff01 instructions
 
-With parameters , we can create complex query to fast sort functions. 
-For example, we are searching for a stripped checksum function. 
-We know the function use 2 parameters (input value, size) and the function initialise 2 constant : 0xffff and 0xA001
+The same attributes can be used twice. ie : `eval F(xor_cst:0x41 xor_cst:0x42)`-> match all functions with xor X, 0x41 instructions AND xor X,0x42
 
-We can create query : `eval F(section:.text params:2 mov_cst:0xa001)` -> We found our function pretty fast
+With parameters , we can create complex query to fast sort functions.
+For example, we are searching for a stripped checksum function.  
+We know the function use 2 parameters (input value, size) and the function initialise 2 constant : 0xffff and 0xA001
+We also know there is loop in the function so there is at least 3 blocks 
+
+We can create query : `eval F(section:.text params:2 mov_cst:0xa001 block_more:2)` -> We found our function pretty fast
 
 ## commands 
 
@@ -50,7 +58,13 @@ We can create query : `eval F(section:.text params:2 mov_cst:0xa001)` -> We foun
 - clear : clear terminal
 - sections : list binary sections
 - eval_list : list all attributes for expressions
+- uncolor : Remove all generated color created by matching instructions const
 
 ## BUGS & SUPPORT
 
 for now, this program has been tested on armv7 and x86. feel free to pull req/create an issue
+
+
+# DEV
+
+AND/OR/NOT

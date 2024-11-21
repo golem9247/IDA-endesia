@@ -76,3 +76,14 @@ def get_instructions_by_function(ea):
             disasm = idc.generate_disasm_line(addr, 0)
             instructions.append((addr, disasm))
     return instructions
+
+def get_number_of_blocks(ea):
+    """
+    Retrieves the number of basic blocks in a function at the specified address.
+    """
+    func = ida_funcs.get_func(ea)
+    if not func:
+        return None
+    flowchart = idaapi.FlowChart(func)
+    block_count = sum(1 for _ in flowchart)
+    return block_count
